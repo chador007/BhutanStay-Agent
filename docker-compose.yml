@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:17
+    container_name: bhutan_db_local
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: chador2003
+      POSTGRES_DB: bhutan_stay
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
