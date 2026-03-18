@@ -71,7 +71,6 @@ tools = [
     getGuestBookings
 ]
 
-llm_with_tools = llm.bind_tools(tools)
 
 # Tool router dictionary
 tools_map = {
@@ -293,6 +292,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     session_id: str
+
 def run_agent_step(session_id: str, user_input: str) -> str:
 
     if session_id not in session_store:
@@ -304,13 +304,16 @@ def run_agent_step(session_id: str, user_input: str) -> str:
     MAX_STEPS = 5
     step_count = 0
     final_response = ""
-    last_tool_call = None  # ✅ Track duplicate calls
+    
+    # ✅ Track ALL tool calls made (not just the last one)
+    tool_call_history = []
+    same_tool_count = {}  # Count how many times each tool is called
 
     while step_count < MAX_STEPS:
 
         step_count += 1
 
-        response = llm_with_tools.invoke(messages, tools=TOOL_DESCRIPTIONS)
+        response = llm.invoke(messages, tools=TOOL_DESCRIPTIONS)
 
         normalized_content = extract_text_content(response.content)
 
@@ -327,20 +330,13 @@ def run_agent_step(session_id: str, user_input: str) -> str:
             final_response = normalized_content
             break
 
-        # ✅ Detect duplicate tool call (same name + same args = stuck in loop)
-        current_call = (
-            response.tool_calls[0]["name"],
-            str(response.tool_calls[0]["args"])
-        )
-
-        if current_call == last_tool_call:
-            print("⚠️ Duplicate tool call detected, breaking loop")
-            # If there's text content alongside the tool call, use it
-            if normalized_content:
-                final_response = normalized_content
+        # ✅ Check for excessive same-tool calls
+        current_tool_name = response.tool_calls[0]["name"]
+        same_tool_count[current_tool_name] = same_tool_count.get(current_tool_name, 0) + 1
+        
+        if same_tool_count[current_tool_name] >= 3:
+            print(f"⚠️ Tool '{current_tool_name}' called {same_tool_count[current_tool_name]} times, breaking loop")
             break
-
-        last_tool_call = current_call
 
         # Execute tools
         for tool_call in response.tool_calls:
@@ -356,11 +352,12 @@ def run_agent_step(session_id: str, user_input: str) -> str:
 
             if selected_tool:
                 try:
-                    tool_output = selected_tool(tool_args)
+                    tool_output = selected_tool(**tool_args)
                 except Exception as e:
                     tool_output = f"Tool execution error: {str(e)}"
+                    print(f"❌ Error: {e}")
 
-            print(f"   Result preview: {str(tool_output)[:200]}")  # ✅ Debug output
+            print(f"   Result preview: {str(tool_output)[:200]}")
 
             tool_message = ToolMessage(
                 tool_call_id=tool_call["id"],
@@ -370,26 +367,20 @@ def run_agent_step(session_id: str, user_input: str) -> str:
 
             messages.append(tool_message)
 
-    # ✅ FALLBACK: If loop exhausted or broke without a response,
-    #    force one final LLM call WITHOUT tools to get a summary
+    # ✅ FALLBACK
     if not final_response:
 
         print("⚠️ No final response yet — forcing summary call without tools")
 
         messages.append(
             HumanMessage(
-                content="Please summarize the results from the tool calls above and respond to the user."
+                content="Based on the tool results above, please provide a helpful response to the user. If no results were found, suggest alternatives."
             )
         )
 
-        # Call LLM WITHOUT tools so it MUST produce text
         fallback_response = llm.invoke(messages)
-
         final_response = extract_text_content(fallback_response.content)
-
-        messages.append(
-            AIMessage(content=final_response)
-        )
+        messages.append(AIMessage(content=final_response))
 
     session_store[session_id] = messages
 
