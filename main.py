@@ -1,22 +1,38 @@
 import datetime
 import os
-from typing import List, Dict, Any, Optional
+from typing import List, Dict
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from langchain_core.messages import (
-    HumanMessage, SystemMessage, ToolMessage, AIMessage, BaseMessage, message_to_dict, messages_from_dict
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+    AIMessage,
+    BaseMessage
 )
+
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from fastapi.middleware.cors import CORSMiddleware
+
+from sqlalchemy import text
+
 from database import get_db
 
-from tools import search_inventory, manage_reservations
-from sqlalchemy import text
-import asyncpg
+from tools_updated import (
+    searchProperties,
+    compareProperties,
+    checkRoomAvailability,
+    getPropertyDetails,
+    getRoomDetails,
+    createBooking,
+    cancelBooking,
+    getGuestBookings
+)
 
 load_dotenv()
 
@@ -24,154 +40,393 @@ app = FastAPI(title="BhutanStay AI API", version="1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins, change this to your frontend URL in production
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods (POST, OPTIONS, etc.)
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-
 session_store: Dict[str, List[BaseMessage]] = {}
-# llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0)
-# llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
 
-llm = ChatOpenAI(model="gpt-4o", temperature=0)
+# llm = ChatOpenAI(
+#     model="gpt-4o",
+#     temperature=0
+# )
 
-tools = [search_inventory, manage_reservations]
+llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
+# llm = ChatGroq(
+#     model="llama-3.3-70b-versatile",
+#     temperature=0,
+#     api_key=os.getenv("GROQ_API_KEY")
+# )
+
+tools = [
+    searchProperties,
+    compareProperties,
+    checkRoomAvailability,
+    getPropertyDetails,
+    getRoomDetails,
+    createBooking,
+    cancelBooking,
+    getGuestBookings
+]
+
 llm_with_tools = llm.bind_tools(tools)
 
+# Tool router dictionary
 tools_map = {
-    "search_inventory": search_inventory,
-    "manage_reservations": manage_reservations,
+    "searchProperties": searchProperties,
+    "compareProperties": compareProperties,
+    "checkRoomAvailability": checkRoomAvailability,
+    "getPropertyDetails": getPropertyDetails,
+    "getRoomDetails": getRoomDetails,
+    "createBooking": createBooking,
+    "cancelBooking": cancelBooking,
+    "getGuestBookings": getGuestBookings
+}
+TOOL_DESCRIPTIONS = [
+
+{
+"name": "searchProperties",
+"description": "Search for hotels based on location, price, rating and guest count",
+"parameters": {
+    "type": "object",
+    "properties": {
+        "city": {"type": "string"},
+        "property_type": {"type": "string"},
+        "minPrice": {"type": "number"},
+        "maxPrice": {"type": "number"},
+        "adults": {"type": "integer"},
+        "children": {"type": "integer"},
+        "rating": {"type": "number"}
+    },
+    "required": ["city"]
+}
+},
+
+{
+"name": "checkRoomAvailability",
+"description": "Check if rooms are available for given dates",
+"parameters": {
+    "type": "object",
+    "properties": {
+        "property_id": {"type": "string"},
+        "checkInDate": {"type": "string", "format": "date"},
+        "checkOutDate": {"type": "string", "format": "date"},
+        "adults": {"type": "integer"},
+        "children": {"type": "integer"}
+    },
+    "required": ["property_id", "checkInDate", "checkOutDate"]
+}
+},
+
+{
+"name": "getPropertyDetails",
+"description": "Get details about a specific hotel",
+"parameters": {
+    "type": "object",
+    "properties": {
+        "property_id": {"type": "string"}
+    },
+    "required": ["property_id"]
+}
+},
+
+{
+"name": "getRoomDetails",
+"description": "Get information about a room",
+"parameters": {
+    "type": "object",
+    "properties": {
+        "room_id": {"type": "string"}
+    },
+    "required": ["room_id"]
+}
+},
+
+{
+"name": "createBooking",
+"description": "Create a booking for a room",
+"parameters": {
+    "type": "object",
+    "properties": {
+        "guest_id": {"type": "string"},
+        "property_id": {"type": "string"},
+        "room_id": {"type": "string"},
+        "check_in_date": {"type": "string", "format": "date"},
+        "check_out_date": {"type": "string", "format": "date"},
+        "adults": {"type": "integer"},
+        "children": {"type": "integer"},
+        "payment_method": {"type": "string"}
+    },
+    "required": [
+        "guest_id",
+        "property_id",
+        "room_id",
+        "check_in_date",
+        "check_out_date"
+    ]
+}
+},
+
+{
+"name": "cancelBooking",
+"description": "Cancel a booking",
+"parameters": {
+    "type": "object",
+    "properties": {
+        "booking_id": {"type": "string"},
+        "reason": {"type": "string"}
+    },
+    "required": ["booking_id"]
+}
+},
+
+{
+"name": "getGuestBookings",
+"description": "Get all bookings for a guest",
+"parameters": {
+    "type": "object",
+    "properties": {
+        "guest_id": {"type": "string"}
+    },
+    "required": ["guest_id"]
+}
 }
 
+]
+
+
 def get_system_prompt():
-    raw_system_prompt = """
-    You are the "BhutStay Assistant," an expert hotel management agent for a luxury hotel chain.
-    Your primary goal is to assist users with booking inquiries, reservation management, and room information with efficiency and the warmth of Bhutanese hospitality.
-    
-    ### 🛠️ YOUR CAPABILITIES
-    You have access to specific tools to interact with the hotel database.
-    1. ALWAYS use the provided tools to fetch real-time data.
-    2. NEVER guess or hallucinate booking details.
-    3. If a tool returns "No results," politely inform the user.
 
-    ### 🚨 CRITICAL RULES
-    - **Privacy:** Never reveal personal details unless authenticated.
-    - **Booking IDs:** A valid code looks like 'BK-2024-xxxxxx'.
-    - **Dates:** Always check the current date ({current_date}).
-    - **Tone:** Professional, calm, and welcoming.
-    """
-    return SystemMessage(content=raw_system_prompt.format(
-        current_date=datetime.date.today().isoformat()
-    ))
+    raw_prompt = """## Role
+You are the **BhutStay Assistant**, an intelligent, professional, and warm hotel booking agent designed to provide a seamless travel experience.
 
+## Objectives
+1.  **Search Hotels:** Help users find accommodations based on location, budget, or preferences.
+2.  **Check Availability:** Verify room status for specific dates.
+3.  **View Details:** Provide comprehensive information about amenities and room types.
+4.  **Manage Bookings:** Assist users in creating or canceling reservations efficiently.
 
+## Core Rules
+1.  **Data Integrity:** Always use provided tools to fetch real-time hotel data. Never hallucinate prices, availability, or property details.
+2.  **No Results Policy:** If a tool returns no results, politely inform the user and suggest alternative criteria (e.g., different dates or a nearby location).
+3.  **Tone & Voice:** Maintain a professional yet warm and welcoming "hospitality" tone.
+
+## Formatting Standards (Strict)
+To ensure clarity and scannability, you must follow these formatting rules for every response:
+
+### 1. Structure & Hierarchy
+* Use `##` for main sections and `###` for individual Property Names.
+* Use horizontal rules (`---`) to separate different hotel options or distinct sections.
+
+### 2. Information Display
+* **Property Header:** Include the Star Rating and Address immediately under the property name.
+    * *Example:* **⭐ 4.5 Stars** | 📍 *NewYork, USA*
+* **Amenities:** Use bulleted lists for amenities to avoid dense text blocks.
+* **Room Pricing:** When multiple room types are available, **always use a Markdown table**.
+
+| Room Type | Price per Night | Capacity |
+| :--- | :--- | :--- |
+| **Standard** | $150.00 | 2 Guests |
+| **Deluxe** | $250.00 | 2 Guests |
+
+### 3. Clear Call-to-Action
+Always conclude your response with a focused question or a clear next step to guide the user (e.g., "Would you like me to check the availability for these dates?").
+
+Today's date: {current_date}
+"""
+
+    return SystemMessage(
+        content=raw_prompt.format(
+            current_date=datetime.date.today().isoformat()
+        )
+    )
 
 def save_history_to_db(session_id: str, message: str, response: str):
-    db = get_db()
-    with db._engine.connect() as connection:
-            connection.execute(
-                text("INSERT INTO chat_history (session_id, message, response) VALUES (:s, :m, :r)"),
-                {"s": session_id, "m": message, "r": response}
-            )
-            connection.commit() 
 
-# ─── 4. API Data Models ───
+    db = get_db()
+
+    with db._engine.connect() as conn:
+
+        conn.execute(
+            text("""
+            INSERT INTO chat_history(session_id, message, response)
+            VALUES(:s, :m, :r)
+            """),
+            {
+                "s": session_id,
+                "m": message,
+                "r": response
+            }
+        )
+
+        conn.commit()
+def extract_text_content(content) -> str:
+    """
+    Gemini returns content as a list of dicts like:
+      [{'type': 'text', 'text': '...'}]
+    OpenAI returns a plain string.
+    This normalizes both to a plain string.
+    """
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block["text"])
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(parts)
+
+    return str(content)
+
+
+
 class ChatRequest(BaseModel):
     session_id: str
     message: str
 
+
 class ChatResponse(BaseModel):
     response: str
     session_id: str
-
 def run_agent_step(session_id: str, user_input: str) -> str:
-    """
-    Retrieves history, runs the LLM loop, executes tools, and saves history.
-    """
-    
+
     if session_id not in session_store:
         session_store[session_id] = [get_system_prompt()]
+
     messages = session_store[session_id]
     messages.append(HumanMessage(content=user_input))
 
     MAX_STEPS = 5
     step_count = 0
-
     final_response = ""
+    last_tool_call = None  # ✅ Track duplicate calls
 
     while step_count < MAX_STEPS:
-        step_count += 1
-        
-        # Invoke LLM
-        response = llm_with_tools.invoke(messages)
-        clean_response = AIMessage(
-            content=response.content,
-            tool_calls=response.tool_calls, 
-            id=response.id                  
-        )
-    
-        print(clean_response)
-        messages.append(clean_response)
 
-        print("Message list:")
-        print(messages)
-    
-        # Check if LLM wants to stop (no tool calls)
+        step_count += 1
+
+        response = llm_with_tools.invoke(messages, tools=TOOL_DESCRIPTIONS)
+
+        normalized_content = extract_text_content(response.content)
+
+        ai_message = AIMessage(
+            content=normalized_content,
+            tool_calls=response.tool_calls,
+            id=response.id
+        )
+
+        messages.append(ai_message)
+
+        # ✅ If no tool call → final answer
         if not response.tool_calls:
-            final_response = response.content
+            final_response = normalized_content
             break
 
-        # If LLM wants to use tools, execute them
+        # ✅ Detect duplicate tool call (same name + same args = stuck in loop)
+        current_call = (
+            response.tool_calls[0]["name"],
+            str(response.tool_calls[0]["args"])
+        )
+
+        if current_call == last_tool_call:
+            print("⚠️ Duplicate tool call detected, breaking loop")
+            # If there's text content alongside the tool call, use it
+            if normalized_content:
+                final_response = normalized_content
+            break
+
+        last_tool_call = current_call
+
+        # Execute tools
         for tool_call in response.tool_calls:
+
             tool_name = tool_call["name"]
             tool_args = tool_call["args"]
-            
-            # Find the tool
+
+            print(f"🔧 Agent calling tool: {tool_name}")
+            print(f"   Arguments: {tool_args}")
+
             selected_tool = tools_map.get(tool_name)
-            tool_output = "Error: Tool not found"
-            
+            tool_output = "Tool not found"
+
             if selected_tool:
                 try:
-                    # Run the tool
-                    print(f"🔧 API executing: {tool_name} with {tool_args}")
-                    raw_result = selected_tool.invoke(tool_args)
-                    tool_output = str(raw_result)
+                    tool_output = selected_tool(tool_args)
                 except Exception as e:
-                    tool_output = f"Tool Execution Error: {str(e)}"
-            
-            # Append Tool Message back to history
+                    tool_output = f"Tool execution error: {str(e)}"
+
+            print(f"   Result preview: {str(tool_output)[:200]}")  # ✅ Debug output
 
             tool_message = ToolMessage(
-                tool_call_id=tool_call["id"], 
-                content=tool_output,
-                name=tool_name)
-            
-            print("Tool Message:")
-            print(tool_message)
+                tool_call_id=tool_call["id"],
+                name=tool_name,
+                content=str(tool_output)
+            )
+
             messages.append(tool_message)
 
-    # 3. Update Session Store
+    # ✅ FALLBACK: If loop exhausted or broke without a response,
+    #    force one final LLM call WITHOUT tools to get a summary
+    if not final_response:
+
+        print("⚠️ No final response yet — forcing summary call without tools")
+
+        messages.append(
+            HumanMessage(
+                content="Please summarize the results from the tool calls above and respond to the user."
+            )
+        )
+
+        # Call LLM WITHOUT tools so it MUST produce text
+        fallback_response = llm.invoke(messages)
+
+        final_response = extract_text_content(fallback_response.content)
+
+        messages.append(
+            AIMessage(content=final_response)
+        )
+
     session_store[session_id] = messages
 
-    
     return final_response
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
+
     try:
+
         if not request.session_id:
-            raise HTTPException(status_code=400, detail="Session ID is required")
+            raise HTTPException(
+                status_code=400,
+                detail="Session ID required"
+            )
 
-        answer = run_agent_step(request.session_id, request.message)
+        answer = run_agent_step(
+            request.session_id,
+            request.message
+        )
 
-        # save_history_to_db(request.session_id, request.message, answer)
+        save_history_to_db(
+            request.session_id,
+            request.message,
+            answer
+        )
 
         return ChatResponse(
-            session_id=request.session_id, 
+            session_id=request.session_id,
             response=answer
         )
+
     except Exception as e:
-        # Log the error to your terminal so you can see what went wrong
-        print(f"Error in chat_endpoint: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+
+        print("Chat error:", e)
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
