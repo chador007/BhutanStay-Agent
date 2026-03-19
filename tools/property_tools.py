@@ -1,23 +1,9 @@
 import json
-from datetime import date, datetime
-from decimal import Decimal
-from uuid import UUID
-
-from langchain_core.tools import tool
 from sqlalchemy import text
+from db.database import get_db
+from datetime import date
+from .utils import custom_serializer
 
-from database import get_db
-
-def custom_serializer(obj):
-    """JSON serializer for objects not serializable by default json code"""
-    if isinstance(obj, (datetime, date)):
-        return obj.isoformat()
-    if isinstance(obj, (UUID, Decimal)):
-        return str(obj)
-    return str(obj) 
-
-
-# READ TOOLS
 def searchProperties(
     city: str = None,
     property_type: str = None,
@@ -148,6 +134,8 @@ def searchProperties(
     except Exception as e:
         return f"Database Error: {str(e)}"
     
+
+
 def compareProperties(property_ids: list[str]) -> str:
 
     print("Tool compareProperties called")
@@ -178,55 +166,6 @@ def compareProperties(property_ids: list[str]) -> str:
             data = [dict(zip(result.keys(), row)) for row in rows]
 
             return json.dumps(data, default=custom_serializer, indent=2)
-
-    except Exception as e:
-        return str(e)
-
-def checkRoomAvailability(
-    property_id: str,
-    checkInDate,
-    checkOutDate,
-    adults: int = None,
-    children: int = None
-):
-
-    print("Tool checkRoomAvailability called")
-
-    db = get_db()
-    engine = db._engine if hasattr(db, "_engine") else db
-
-    capacity = (adults or 0) + (children or 0)
-
-    try:
-
-        query = text("""
-        SELECT r.id, r.room_number, r.capacity, r.base_price
-        FROM rooms r
-        WHERE r.property_id = :property_id
-        AND r.capacity >= :capacity
-        AND r.id NOT IN (
-            SELECT room_id FROM bookings
-            WHERE booking_status != 'cancelled'
-            AND check_in_date < :checkout
-            AND check_out_date > :checkin
-        )
-        """)
-
-        params = {
-            "property_id": property_id,
-            "capacity": capacity,
-            "checkin": checkInDate,
-            "checkout": checkOutDate
-        }
-
-        with engine.connect() as conn:
-
-            result = conn.execute(query, params)
-            rows = result.fetchall()
-
-            data = [dict(zip(result.keys(), row)) for row in rows]
-
-            return json.dumps(data, default=custom_serializer)
 
     except Exception as e:
         return str(e)
@@ -273,169 +212,3 @@ def getPropertyDetails(property_id: str):
 
     except Exception as e:
         return str(e)
-    
-def getRoomDetails(room_id: str):
-
-    print("Tool getRoomDetails called")
-
-    db = get_db()
-    engine = db._engine if hasattr(db, "_engine") else db
-
-    try:
-
-        query = text("""
-        SELECT 
-            r.room_number,
-            r.floor,
-            r.capacity,
-            r.base_price,
-            r.description,
-            r.amenities,
-            rt.name AS room_type
-        FROM rooms r
-        JOIN room_types rt ON rt.id = r.room_type_id
-        WHERE r.id = :rid
-        """)
-
-        with engine.connect() as conn:
-
-            result = conn.execute(query, {"rid": room_id})
-            row = result.fetchone()
-
-            if not row:
-                return "Room not found"
-
-            return json.dumps(dict(zip(result.keys(), row)))
-
-    except Exception as e:
-        return str(e)
-    
-def createBooking(
-    guest_id: str,
-    property_id: str,
-    room_id: str,
-    check_in_date,
-    check_out_date,
-    adults: int,
-    children: int,
-    payment_method: str,
-    special_requests: str = None
-):
-
-    print("Tool createBooking called")
-
-    db = get_db()
-    engine = db._engine if hasattr(db, "_engine") else db
-
-    try:
-
-        query = text("""
-        INSERT INTO bookings(
-            guest_id,
-            property_id,
-            room_id,
-            check_in_date,
-            check_out_date,
-            adults,
-            children,
-            payment_method,
-            booking_status
-        )
-        VALUES(
-            :guest,
-            :property,
-            :room,
-            :checkin,
-            :checkout,
-            :adults,
-            :children,
-            :payment,
-            'confirmed'
-        )
-        RETURNING id
-        """)
-
-        params = {
-            "guest": guest_id,
-            "property": property_id,
-            "room": room_id,
-            "checkin": check_in_date,
-            "checkout": check_out_date,
-            "adults": adults,
-            "children": children,
-            "payment": payment_method
-        }
-
-        with engine.connect() as conn:
-
-            result = conn.execute(query, params)
-            booking_id = result.fetchone()[0]
-            conn.commit()
-
-            return f"Booking created successfully. Booking ID: {booking_id}"
-
-    except Exception as e:
-        return str(e)
-    
-def cancelBooking(booking_id: str, reason: str):
-
-    print("Tool cancelBooking called")
-
-    db = get_db()
-    engine = db._engine if hasattr(db, "_engine") else db
-
-    try:
-
-        query = text("""
-        UPDATE bookings
-        SET booking_status='cancelled',
-        cancellation_reason=:reason,
-        cancelled_at=NOW()
-        WHERE id=:id
-        """)
-
-        with engine.connect() as conn:
-
-            conn.execute(query, {"id": booking_id, "reason": reason})
-            conn.commit()
-
-            return "Booking cancelled successfully"
-
-    except Exception as e:
-        return str(e)
-    
-def getGuestBookings(guest_id: str):
-
-    print("Tool getGuestBookings called")
-
-    db = get_db()
-    engine = db._engine if hasattr(db, "_engine") else db
-
-    try:
-
-        query = text("""
-        SELECT 
-            b.booking_code,
-            b.check_in_date,
-            b.check_out_date,
-            b.booking_status,
-            b.payment_status,
-            b.grand_total,
-            p.name AS property_name
-        FROM bookings b
-        JOIN properties p ON p.id=b.property_id
-        WHERE b.guest_id=:gid
-        """)
-
-        with engine.connect() as conn:
-
-            result = conn.execute(query, {"gid": guest_id})
-            rows = result.fetchall()
-
-            data = [dict(zip(result.keys(), row)) for row in rows]
-
-            return json.dumps(data)
-
-    except Exception as e:
-        return str(e)
-    
