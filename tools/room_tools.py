@@ -1,43 +1,32 @@
 import json
-from sqlalchemy import text
-from db.database import get_db
+from db.database import get_db_cursor 
 from .utils import custom_serializer
 
 def getRoomDetails(room_id: str):
-
     print("Tool getRoomDetails called")
 
-    db = get_db()
-    engine = db._engine if hasattr(db, "_engine") else db
-
     try:
-
-        query = text("""
+        query = """
         SELECT 
-            r.room_number,
-            r.floor,
-            r.capacity,
-            r.base_price,
-            r.description,
-            r.amenities,
-            rt.name AS room_type
+            r.room_number, r.floor, r.capacity, r.base_price,
+            r.description, r.amenities, rt.name AS room_type
         FROM rooms r
         JOIN room_types rt ON rt.id = r.room_type_id
-        WHERE r.id = :rid
-        """)
-
-        with engine.connect() as conn:
-
-            result = conn.execute(query, {"rid": room_id})
-            row = result.fetchone()
+        WHERE r.id = %s;
+        """
+        with get_db_cursor() as cur:
+            cur.execute(query, (room_id,))
+            row = cur.fetchone()
 
             if not row:
                 return "Room not found"
 
-            return json.dumps(dict(zip(result.keys(), row)))
+            # Fetch column names for dictionary mapping
+            colnames = [desc[0] for desc in cur.description]
+            return json.dumps(dict(zip(colnames, row)), default=custom_serializer)
 
     except Exception as e:
-        return str(e)
+        return f"Error fetching room details: {str(e)}"
     
 
 def checkRoomAvailability(
@@ -47,44 +36,35 @@ def checkRoomAvailability(
     adults: int = None,
     children: int = None
 ):
-
     print("Tool checkRoomAvailability called")
 
-    db = get_db()
-    engine = db._engine if hasattr(db, "_engine") else db
-
+    # Calculate total capacity needed
     capacity = (adults or 0) + (children or 0)
 
     try:
-
-        query = text("""
+        query = """
         SELECT r.id, r.room_number, r.capacity, r.base_price
         FROM rooms r
-        WHERE r.property_id = :property_id
-        AND r.capacity >= :capacity
+        WHERE r.property_id = %s
+        AND r.capacity >= %s
         AND r.id NOT IN (
             SELECT room_id FROM bookings
             WHERE booking_status != 'cancelled'
-            AND check_in_date < :checkout
-            AND check_out_date > :checkin
-        )
-        """)
+            AND check_in_date < %s
+            AND check_out_date > %s
+        );
+        """
+        # Parameters must be in the exact order of the %s in the query
+        params = (property_id, capacity, checkOutDate, checkInDate)
 
-        params = {
-            "property_id": property_id,
-            "capacity": capacity,
-            "checkin": checkInDate,
-            "checkout": checkOutDate
-        }
+        with get_db_cursor() as cur:
+            cur.execute(query, params)
+            rows = cur.fetchall()
 
-        with engine.connect() as conn:
-
-            result = conn.execute(query, params)
-            rows = result.fetchall()
-
-            data = [dict(zip(result.keys(), row)) for row in rows]
+            colnames = [desc[0] for desc in cur.description]
+            data = [dict(zip(colnames, row)) for row in rows]
 
             return json.dumps(data, default=custom_serializer)
 
     except Exception as e:
-        return str(e)
+        return f"Error checking availability: {str(e)}"

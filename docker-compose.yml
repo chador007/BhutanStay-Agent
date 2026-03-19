@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:17
+    image: pgvector/pgvector:pg17
     container_name: bhutan_db_local
     environment:
       POSTGRES_USER: postgres

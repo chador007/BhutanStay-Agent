@@ -16,7 +16,6 @@ def custom_serializer(obj):
 
 
 def format_json(data):
-
     return json.dumps(
         data,
         default=custom_serializer,

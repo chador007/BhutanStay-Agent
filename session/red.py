@@ -8,11 +8,6 @@ r = redis.Redis(
     decode_responses=True
 )
 
-
-# ───────────────────────────────────────────
-#  SLIDING WINDOW (conversation history)
-# ───────────────────────────────────────────
-
 def update_sliding_window(session_id, user_msg, ai_res, max_size=10):
     key = f"session:{session_id}:history"
     r.lpush(key, json.dumps({"role": "user", "content": user_msg}))
@@ -25,16 +20,7 @@ def get_recent_history(session_id):
     return [json.loads(m) for m in r.lrange(key, 0, -1)]
 
 
-# ───────────────────────────────────────────
-#  WORKING MEMORY (structured, per-session)
-# ───────────────────────────────────────────
-
 def get_working_memory(session_id: str) -> dict:
-    """
-    Retrieve the full working memory as a nested dict.
-    Stored as a single JSON string in Redis for proper
-    support of nested objects, lists, etc.
-    """
     key = f"session:{session_id}:working_memory"
     data = r.get(key)
     if data:
@@ -46,20 +32,6 @@ def get_working_memory(session_id: str) -> dict:
 
 
 def update_working_memory(session_id: str, extracted_data: dict) -> dict:
-    """
-    Apply dot-notation updates from the extraction LLM
-    to the existing working memory.
-
-    Example extracted_data:
-        {
-            "search_context.budget.max": 200,
-            "search_context.filters": ["pool", "spa"],
-            "location": "Paro"
-        }
-
-    Dot-notation keys are walked/created as nested dicts.
-    Plain keys are set at the top level.
-    """
     if not extracted_data:
         return get_working_memory(session_id)
 
@@ -68,12 +40,9 @@ def update_working_memory(session_id: str, extracted_data: dict) -> dict:
 
     for dot_key, value in extracted_data.items():
         keys = dot_key.split(".")
-
         if len(keys) == 1:
-            # Simple top-level key like "location"
             current[keys[0]] = value
         else:
-            # Nested key like "search_context.budget.max"
             obj = current
             for k in keys[:-1]:
                 if k not in obj or not isinstance(obj[k], dict):
@@ -87,6 +56,42 @@ def update_working_memory(session_id: str, extracted_data: dict) -> dict:
 
 
 def reset_working_memory(session_id: str):
-    """Clear working memory for a session."""
     key = f"session:{session_id}:working_memory"
+    r.delete(key)
+
+
+def increment_turn_counter(session_id: str) -> int:
+    """Increment and return the current turn count."""
+    key = f"session:{session_id}:turn_count"
+    count = r.incr(key)
+    r.expire(key, 86400)
+    return count
+
+
+def get_turn_counter(session_id: str) -> int:
+    key = f"session:{session_id}:turn_count"
+    val = r.get(key)
+    return int(val) if val else 0
+
+
+def reset_turn_counter(session_id: str):
+    key = f"session:{session_id}:turn_count"
+    r.set(key, 0)
+    r.expire(key, 86400)
+
+def append_to_summary_buffer(session_id: str, role: str, content: str):
+    """Add a message to the buffer awaiting summarization."""
+    key = f"session:{session_id}:summary_buffer"
+    r.rpush(key, json.dumps({"role": role, "content": content}))
+    r.expire(key, 86400)
+
+
+def get_summary_buffer(session_id: str) -> list[dict]:
+    key = f"session:{session_id}:summary_buffer"
+    raw = r.lrange(key, 0, -1)
+    return [json.loads(m) for m in raw]
+
+
+def clear_summary_buffer(session_id: str):
+    key = f"session:{session_id}:summary_buffer"
     r.delete(key)
