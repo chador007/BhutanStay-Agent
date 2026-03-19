@@ -24,3 +24,5 @@ volumes:
   postgres_data:
   redis_data:
   
+
+# docker exec -it bhutan_redis_local redis-cli -a chador2003
