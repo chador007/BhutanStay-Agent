@@ -91,7 +91,6 @@ def get_summary_buffer(session_id: str) -> list[dict]:
     raw = r.lrange(key, 0, -1)
     return [json.loads(m) for m in raw]
 
-
 def clear_summary_buffer(session_id: str):
     key = f"session:{session_id}:summary_buffer"
     r.delete(key)

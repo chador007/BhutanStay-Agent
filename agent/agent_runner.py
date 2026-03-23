@@ -31,11 +31,6 @@ MEMORY_MARKER = "## Current Working Memory"
 SEMANTIC_MARKER = "## Relevant Past Context"
 SUMMARY_EVERY_N_TURNS = 10
 
-
-# ═══════════════════════════════════════════
-#  MESSAGE SANITIZATION (Gemini compatibility)
-# ═══════════════════════════════════════════
-
 def _sanitize_messages(messages):
     """
     Fix message ordering to satisfy Gemini's strict rules:
@@ -117,10 +112,6 @@ def _sanitize_messages(messages):
     return sanitized
 
 
-# ═══════════════════════════════════════════
-#  SMART TRIMMING (cut at clean boundaries)
-# ═══════════════════════════════════════════
-
 def _smart_trim(serializable_messages, max_total=11):
     """
     Trim message history while always cutting at a 
@@ -155,10 +146,6 @@ def _smart_trim(serializable_messages, max_total=11):
     # Last resort
     return [system_msg] + fallback[-max_keep:]
 
-
-# ═══════════════════════════════════════════
-#  CONTEXT INJECTION (memory & semantics)
-# ═══════════════════════════════════════════
 
 def _build_memory_message(memory: dict):
     if not memory:
@@ -203,10 +190,6 @@ def _strip_injected_messages(messages):
     ]
 
 
-# ═══════════════════════════════════════════
-#  SUMMARIZATION TRIGGER
-# ═══════════════════════════════════════════
-
 def _maybe_summarize(session_id: str, turn_count: int):
     if turn_count % SUMMARY_EVERY_N_TURNS != 0:
         return
@@ -235,9 +218,6 @@ def _maybe_summarize(session_id: str, turn_count: int):
         print(f"[semantic_memory] Summarization failed: {e}")
 
 
-# ═══════════════════════════════════════════
-#  MAIN AGENT LOOP
-# ═══════════════════════════════════════════
 
 def run_agent_step(session_id: str, user_input: str):
     history_key = f"session:{session_id}:history"

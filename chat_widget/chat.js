@@ -99,7 +99,6 @@ function quick(text) {
   getBotResponse(text);
 }
 
-// ── API call (unchanged) ─────────────────────────────────────────
 async function getBotResponse(text) {
   if (!text.trim()) return;
   addMsg(text, "user");
@@ -108,18 +107,45 @@ async function getBotResponse(text) {
   chatWindow.scrollTo({ top: chatWindow.scrollHeight, behavior: "smooth" });
 
   try {
+    console.log("=== SENDING REQUEST ===");
+    console.log("session_id:", sessionId);
+    console.log("message:", text);
+
     const res = await fetch("http://127.0.0.1:8000/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sessionId, message: text }),
     });
+
+    console.log("=== RESPONSE STATUS ===");
+    console.log("status:", res.status);
+    console.log("ok:", res.ok);
+
+    // Check if response is OK before parsing
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error("=== ERROR RESPONSE ===");
+      console.error("body:", errorText);
+      typing.classList.remove("show");
+      addMsg("**Error:** Server returned status " + res.status, "bot");
+      return;
+    }
+
     const data = await res.json();
+
+    console.log("=== RESPONSE DATA ===");
+    console.log("data:", JSON.stringify(data));
+    console.log("extracted:", extract(data));
+
     typing.classList.remove("show");
     addMsg(extract(data), "bot");
-  } catch {
+
+  } catch (err) {
+    console.error("=== FETCH ERROR ===");
+    console.error(err);
     typing.classList.remove("show");
     addMsg(
-      "**Connection Error**\n\nUnable to reach the backend. Please check that the server is running at `http://127.0.0.1:8000`.",
+      "**Connection Error**\n\nUnable to reach the backend. Please check that the server is running.",
       "bot"
     );
   }

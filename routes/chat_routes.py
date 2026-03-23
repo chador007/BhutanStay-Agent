@@ -5,7 +5,6 @@ from services.chat_service import handle_chat
 
 router = APIRouter()
 
-
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
 

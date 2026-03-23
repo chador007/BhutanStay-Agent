@@ -3,7 +3,7 @@ from langchain_openai import ChatOpenAI
 VLLM_URL = "http://172.19.9.235:5000/v1"
 
 summary_llm = ChatOpenAI(
-    model="google/gemma-2-9b-it",
+    model="Qwen/Qwen2.5-7B-Instruct",
     openai_api_key="EMPTY",
     base_url=VLLM_URL,
     temperature=0,

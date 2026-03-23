@@ -82,32 +82,71 @@ TOOL_DESCRIPTIONS = [
         "room_id": {"type": "string"}
     },
     "required": ["room_id"]
-}
+    }
 },
+# {
+# "name": "createBooking",
+# "description": "Create a booking for a room",
+# "parameters": {
+#     "type": "object",
+#     "properties": {
+#         "property_id": {"type": "string"},
+#         "room_id": {"type": "string"},
+#         "check_in_date": {"type": "string", "format": "date"},
+#         "check_out_date": {"type": "string", "format": "date"},
+#         "adults": {"type": "integer"},
+#         "children": {"type": "integer"},
+#         "payment_method": {"type": "string"}
+#     },
+#     "required": [
+#         "property_id", 
+#         "room_id", 
+#         "check_in_date", 
+#         "check_out_date",
+#         "adults",
+#         "children",
+#         "payment_method"
+#     ]
+# }
+# },
 
 {
-"name": "createBooking",
-"description": "Create a booking for a room",
-"parameters": {
+  "name": "createBooking",
+  "description": "Generates a formatted booking confirmation message for the user to copy and paste into WhatsApp.",
+  "parameters": {
     "type": "object",
     "properties": {
-        "guest_id": {"type": "string"},
-        "property_id": {"type": "string"},
-        "room_id": {"type": "string"},
-        "check_in_date": {"type": "string", "format": "date"},
-        "check_out_date": {"type": "string", "format": "date"},
-        "adults": {"type": "integer"},
-        "children": {"type": "integer"},
-        "payment_method": {"type": "string"}
+      "guest_name": {
+        "type": "string",
+        "description": "The name of the guest (e.g., Chador)"
+      },
+      "hotel_name": {
+        "type": "string", 
+        "description": "The name of the hotel (e.g., Wangchuk Hotel)"
+      },
+      "room_number": {
+        "type": "string",
+        "description": "The room number (e.g., 101)"
+      },
+      "room_price": {
+        "type": "string",
+        "description": "The price of the room including currency"
+      },
+      "check_in_date": {"type": "string", "format": "date"},
+      "check_out_date": {"type": "string", "format": "date"},
+      "adults": {"type": "integer"},
+      "children": {"type": "integer"}
     },
     "required": [
-        "guest_id",
-        "property_id",
-        "room_id",
-        "check_in_date",
-        "check_out_date"
+      "guest_name",
+      "hotel_name",
+      "room_number",
+      "room_price",
+      "check_in_date",
+      "check_out_date",
+      "adults"
     ]
-}
+  }
 },
 
 {

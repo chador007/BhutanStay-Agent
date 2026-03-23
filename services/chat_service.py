@@ -6,10 +6,10 @@ def handle_chat(session_id, message):
 
     response = run_agent_step(session_id, message)
 
-    save_history_to_db(
-        session_id,
-        message,
-        response
-    )
+    # save_history_to_db(
+    #     session_id,
+    #     message,
+    #     response
+    # )
 
     return response
